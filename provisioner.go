@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	salt "github.com/finarfin/go-salt-netapi-client/cherrypy"
@@ -53,53 +54,82 @@ func Provisioner() terraform.ResourceProvisioner {
 
 func apply(ctx context.Context) error {
 	o := ctx.Value(schema.ProvOutputKey).(terraform.UIOutput)
-	data := ctx.Value(schema.ProvConfigDataKey).(*schema.ResourceData)
+	d := ctx.Value(schema.ProvConfigDataKey).(*schema.ResourceData)
 
 	cli := salt.NewClient(
-		data.Get("address").(string),
-		data.Get("username").(string),
-		data.Get("password").(string),
-		data.Get("backend").(string),
+		d.Get("address").(string),
+		d.Get("username").(string),
+		d.Get("password").(string),
+		d.Get("backend").(string),
 	)
 
 	if err := cli.Login(); err != nil {
 		return err
 	}
 
-	timeout := time.Duration(data.Get("timeout_minutes").(int)) * time.Minute
-	interval := time.Duration(data.Get("interval_secs").(int)) * time.Second
-	minion := data.Get("minion_id").(string)
+	timeout := time.Duration(d.Get("timeout_minutes").(int)) * time.Minute
+	interval := time.Duration(d.Get("interval_secs").(int)) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	minion := d.Get("minion_id").(string)
 	o.Output(fmt.Sprintf("Waiting for minion %s to register with master", minion))
 	if err := waitForMinion(ctx, o, cli, minion, interval, timeout); err != nil {
 		return err
 	}
 
-	cmd := salt.Command{
-		Client:     "local",
-		Target:     data.Get("minion_id").(string),
+	o.Output(fmt.Sprintf("Executing state.highstate on minion %s", minion))
+	result, err := cli.SubmitJob(salt.MinionJob{
+		Target:     minion,
 		TargetType: salt.List,
 		Function:   "state.highstate",
-	}
-
-	o.Output(fmt.Sprintf("Executing state.highstate on minion %s", minion))
-	minions, err := cli.RunJob(cmd)
+	})
 	if err != nil {
 		return err
 	}
 
-	if len(minions) != 1 {
-		return fmt.Errorf("Expected results from 1 minion but received %d", len(minions))
-	}
+	for {
+		time.Sleep(interval)
 
-	lowStates := minions[minion].(map[string]interface{})
-	for k, v := range lowStates {
-		state := v.(map[string]interface{})
-		if state["result"] == nil || !state["result"].(bool) {
-			return fmt.Errorf("State %s failed on %s: %s", k, minion, state["comment"])
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			data, err := cli.RunJob(salt.Command{
+				Client:   "runner",
+				Function: "jobs.lookup_jid",
+				Args:     []string{result.JobID},
+			})
+			if err != nil {
+				return err
+			}
+
+			minions, ok := data["data"].(map[string]interface{})
+			if !ok {
+				o.Output("Job is not started yet")
+				continue
+			}
+
+			if minionData, ok := minions[minion]; ok {
+				lowstates, ok := minionData.(map[string]interface{})
+				if !ok {
+					log.Println("[TRACE] Highstate job is still executing for minion: " + minion)
+					continue
+				}
+
+				for k, v := range lowstates {
+					state := v.(map[string]interface{})
+					if !state["result"].(bool) {
+						return fmt.Errorf("State %s failed on %s: %s", k, minion, state["comment"])
+					}
+				}
+
+				return nil
+			}
 		}
-	}
 
-	return nil
+		log.Println("[TRACE] Minion has not yet reported status for highstate job: " + minion)
+	}
 }
 
 func validate(c *terraform.ResourceConfig) (ws []string, es []error) {
@@ -107,9 +137,6 @@ func validate(c *terraform.ResourceConfig) (ws []string, es []error) {
 }
 
 func waitForMinion(ctx context.Context, o terraform.UIOutput, cli *salt.Client, minion string, interval time.Duration, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	for {
 		select {
 		case <-ctx.Done():
