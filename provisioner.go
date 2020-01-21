@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
-	client "github.com/finarfin/go-salt-client/cherrypy"
+	salt "github.com/finarfin/go-salt-netapi-client/cherrypy"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
 )
@@ -24,43 +26,23 @@ func Provisioner() terraform.ResourceProvisioner {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"eauth": {
+			"backend": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"cmd": {
-				Type:     schema.TypeSet,
+			"minion_id": {
+				Type:     schema.TypeString,
 				Required: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"client": {
-							Type:     schema.TypeString,
-							Required: true,
-						},
-						"tgt": {
-							Type:     schema.TypeString,
-							Optional: true,
-						},
-						"fun": {
-							Type:     schema.TypeString,
-							Required: true,
-						},
-						"arg": {
-							Type: schema.TypeList,
-							Elem: &schema.Schema{
-								Type: schema.TypeString,
-							},
-							Optional: true,
-						},
-						"kwarg": {
-							Type: schema.TypeMap,
-							Elem: &schema.Schema{
-								Type: schema.TypeString,
-							},
-							Optional: true,
-						},
-					},
-				},
+			},
+			"timeout_minutes": {
+				Type:     schema.TypeInt,
+				Optional: true,
+				Default:  30,
+			},
+			"interval_secs": {
+				Type:     schema.TypeInt,
+				Optional: true,
+				Default:  10,
 			},
 		},
 
@@ -70,59 +52,50 @@ func Provisioner() terraform.ResourceProvisioner {
 }
 
 func apply(ctx context.Context) error {
-	//connState := ctx.Value(schema.ProvRawStateKey).(*terraform.InstanceState)
+	o := ctx.Value(schema.ProvOutputKey).(terraform.UIOutput)
 	data := ctx.Value(schema.ProvConfigDataKey).(*schema.ResourceData)
 
-	cli, err := client.NewClient(
+	cli := salt.NewClient(
 		data.Get("address").(string),
 		data.Get("username").(string),
 		data.Get("password").(string),
-		data.Get("eauth").(string),
+		data.Get("backend").(string),
 	)
 
+	if err := cli.Login(); err != nil {
+		return err
+	}
+
+	timeout := time.Duration(data.Get("timeout_minutes").(int)) * time.Minute
+	interval := time.Duration(data.Get("interval_secs").(int)) * time.Second
+	minion := data.Get("minion_id").(string)
+	o.Output(fmt.Sprintf("Waiting for minion %s to register with master", minion))
+	if err := waitForMinion(ctx, o, cli, minion, interval, timeout); err != nil {
+		return err
+	}
+
+	cmd := salt.Command{
+		Client:     "local",
+		Target:     data.Get("minion_id").(string),
+		TargetType: salt.List,
+		Function:   "state.highstate",
+	}
+
+	o.Output(fmt.Sprintf("Executing state.highstate on minion %s", minion))
+	minions, err := cli.RunJob(cmd)
 	if err != nil {
 		return err
 	}
 
-	rawCmds := data.Get("cmd").(*schema.Set).List()
-	cmds := make([]client.Command, len(rawCmds))
-	for i, cmd := range rawCmds {
-		rawCmd := cmd.(map[string]interface{})
-		cmds[i] = client.Command{
-			Client:   rawCmd["client"].(string),
-			Target:   rawCmd["tgt"].(string),
-			Function: rawCmd["fun"].(string),
-		}
-
-		if v, ok := rawCmd["arg"].([]interface{}); ok {
-			cmds[i].Args = make([]string, len(v))
-			for j, arg := range v {
-				cmds[i].Args[j] = arg.(string)
-			}
-		}
-
-		if v, ok := rawCmd["kwarg"].(map[string]interface{}); ok {
-			cmds[i].Kwargs = make(map[string]string, len(v))
-			for j, arg := range v {
-				cmds[i].Kwargs[j] = arg.(string)
-			}
-		}
+	if len(minions) != 1 {
+		return fmt.Errorf("Expected results from 1 minion but received %d", len(minions))
 	}
 
-	resp, err := cli.Run(cmds)
-	if err != nil {
-		return err
-	}
-
-	result := resp["return"].([]interface{})
-	if len(result) != 1 {
-		return fmt.Errorf("Test failed")
-	}
-
-	for _, res := range result {
-		r := res.(map[string]interface{})
-		if r["result"] == nil || !r["result"].(bool) {
-			return fmt.Errorf("Failed here too")
+	lowStates := minions[minion].(map[string]interface{})
+	for k, v := range lowStates {
+		state := v.(map[string]interface{})
+		if state["result"] == nil || !state["result"].(bool) {
+			return fmt.Errorf("State %s failed on %s: %s", k, minion, state["comment"])
 		}
 	}
 
@@ -131,4 +104,28 @@ func apply(ctx context.Context) error {
 
 func validate(c *terraform.ResourceConfig) (ws []string, es []error) {
 	return ws, es
+}
+
+func waitForMinion(ctx context.Context, o terraform.UIOutput, cli *salt.Client, minion string, interval time.Duration, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			minionData, err := cli.Minion(minion)
+			if err != nil && !errors.Is(err, salt.ErrorMinionNotFound) {
+				return err
+			} else if minionData == nil || minionData.Grains == nil {
+				time.Sleep(interval)
+				continue
+			}
+		}
+
+		break
+	}
+
+	return nil
 }

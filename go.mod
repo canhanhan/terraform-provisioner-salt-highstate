@@ -1,7 +1,8 @@
-module github.com/finarfin/terraform-provisioner-salt
+module github.com/finarfin/terraform-provisioner-salt-highstate
 
 go 1.13
 
-require github.com/hashicorp/terraform v0.12.19
-
-require github.com/finarfin/go-salt-client v0.0.0-20200117220810-d53a3b9118f2
+require (
+	github.com/finarfin/go-salt-netapi-client v0.0.0-20200121025507-e1b7caf50927
+	github.com/hashicorp/terraform v0.12.19
+)
