@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"strings"
 	"time"
 
 	salt "github.com/finarfin/go-salt-netapi-client/cherrypy"
@@ -83,62 +83,49 @@ func apply(ctx context.Context) error {
 	}
 
 	o.Output(fmt.Sprintf("Executing state.highstate on minion %s", minion))
-	result, err := cli.SubmitJob(ctx, salt.MinionJob{
+	res, err := cli.RunCommand(ctx, salt.Command{
+		Client:   salt.LocalClient,
 		Target:   salt.ListTarget{Targets: []string{minion}},
 		Function: "state.highstate",
 	})
+
 	if err != nil {
 		return err
 	}
 
-	for {
-		time.Sleep(interval)
+	rd, ok := res.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid response from Salt Master: expected map; received %s", res)
+	}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			res, err := cli.RunJob(ctx, salt.Command{
-				Client:   "runner",
-				Function: "jobs.lookup_jid",
-				Args:     []string{result.ID},
-			})
+	md, ok := rd[minion]
+	if !ok {
+		return fmt.Errorf("Salt has not returned minion information: %s", d)
+	}
 
-			if err != nil {
-				return err
-			}
+	data, ok := md.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("Minion response was not a map. Minion might be offline: %s", data)
+	}
 
-			data, ok := res.(map[string]interface{})
-			if !ok {
-				return fmt.Errorf("highstate execution failed: %s", res)
-			}
-
-			minions, ok := data["data"].(map[string]interface{})
-			if !ok {
-				o.Output("Job is not started yet")
-				continue
-			}
-
-			if minionData, ok := minions[minion]; ok {
-				lowstates, ok := minionData.(map[string]interface{})
-				if !ok {
-					log.Println("[TRACE] Highstate job is still executing for minion: " + minion)
-					continue
+	if data["retcode"].(float64) != 0 {
+		ls, ok := data["ret"].(map[string]interface{})
+		if ok {
+			var fails []string
+			for k, v := range ls {
+				state := v.(map[string]interface{})
+				if !state["result"].(bool) {
+					fails = append(fails, fmt.Sprintf("State %s failed on %s: %s", k, minion, state["comment"]))
 				}
-
-				for k, v := range lowstates {
-					state := v.(map[string]interface{})
-					if !state["result"].(bool) {
-						return fmt.Errorf("State %s failed on %s: %s", k, minion, state["comment"])
-					}
-				}
-
-				return nil
 			}
+
+			return errors.New(strings.Join(fails, "\n"))
 		}
 
-		log.Println("[TRACE] Minion has not yet reported status for highstate job: " + minion)
+		return fmt.Errorf("Highstate execution failed on %s: %s", minion, data["ret"])
 	}
+
+	return nil
 }
 
 func validate(c *terraform.ResourceConfig) (ws []string, es []error) {
