@@ -63,7 +63,7 @@ func apply(ctx context.Context) error {
 		d.Get("backend").(string),
 	)
 
-	if err := cli.Login(); err != nil {
+	if err := cli.Login(ctx); err != nil {
 		return err
 	}
 
@@ -79,10 +79,9 @@ func apply(ctx context.Context) error {
 	}
 
 	o.Output(fmt.Sprintf("Executing state.highstate on minion %s", minion))
-	result, err := cli.SubmitJob(salt.MinionJob{
-		Target:     minion,
-		TargetType: salt.List,
-		Function:   "state.highstate",
+	result, err := cli.SubmitJob(ctx, salt.MinionJob{
+		Target:   salt.ListTarget{Targets: []string{minion}},
+		Function: "state.highstate",
 	})
 	if err != nil {
 		return err
@@ -95,13 +94,19 @@ func apply(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			data, err := cli.RunJob(salt.Command{
+			res, err := cli.RunJob(ctx, salt.Command{
 				Client:   "runner",
 				Function: "jobs.lookup_jid",
-				Args:     []string{result.JobID},
+				Args:     []string{result.ID},
 			})
+
 			if err != nil {
 				return err
+			}
+
+			data, ok := res.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("highstate execution failed: %s", res)
 			}
 
 			minions, ok := data["data"].(map[string]interface{})
@@ -142,7 +147,7 @@ func waitForMinion(ctx context.Context, o terraform.UIOutput, cli *salt.Client, 
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			minionData, err := cli.Minion(minion)
+			minionData, err := cli.Minion(ctx, minion)
 			if err != nil && !errors.Is(err, salt.ErrorMinionNotFound) {
 				return err
 			} else if minionData == nil || minionData.Grains == nil {
