@@ -12,6 +12,10 @@ import (
 	"github.com/hashicorp/terraform/terraform"
 )
 
+/*
+Provisioner is waits for a minion to connect to a master;
+and applies highstate then reports whether it completed successfully.
+*/
 func Provisioner() terraform.ResourceProvisioner {
 	return &schema.Provisioner{
 		Schema: map[string]*schema.Schema{
