@@ -38,28 +38,28 @@ jobs:
       run: GOOS=windows GOARCH=amd64 go build -v -o terraform-provisioner-salt-highstate_windows_amd64.exe
 
     - name: Upload Linux x86
-      if: !startsWith(github.ref, 'refs/tags/v')
+      if: startsWith(github.ref, 'refs/tags/v') == false
       uses: actions/upload-artifact@v1
       with:
         name: terraform-provisioner-salt-highstate_v0.0.${{ github.run_id }}_linux_386
         path: terraform-provisioner-salt-highstate_linux_386
 
     - name: Upload Linux x64
-      if: !startsWith(github.ref, 'refs/tags/v')
+      if: startsWith(github.ref, 'refs/tags/v') == false
       uses: actions/upload-artifact@v1
       with:
         name: terraform-provisioner-salt-highstate_v0.0.${{ github.run_id }}_linux_amd64
         path: terraform-provisioner-salt-highstate_linux_amd64
 
     - name: Upload Windows x86
-      if: !startsWith(github.ref, 'refs/tags/v')
+      if: startsWith(github.ref, 'refs/tags/v') == false
       uses: actions/upload-artifact@v1
       with:
         name: terraform-provisioner-salt-highstate_v0.0.${{ github.run_id }}_windows_386.exe
         path: terraform-provisioner-salt-highstate_windows_386.exe
 
     - name: Upload Windows x64
-      if: !startsWith(github.ref, 'refs/tags/v')
+      if: startsWith(github.ref, 'refs/tags/v') == false
       uses: actions/upload-artifact@v1
       with:
         name: terraform-provisioner-salt-highstate_v0.0.${{ github.run_id }}_windows_amd64.exe
