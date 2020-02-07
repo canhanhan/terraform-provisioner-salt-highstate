@@ -5,10 +5,13 @@ on:
     - master
 jobs:
   build:
-    name: Build
-    runs-on: [windows-latest, linux]
-    steps:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, linux]
 
+    name: Build
+    steps:
     - name: Set up Go 1.13
       uses: actions/setup-go@v1
       with:
