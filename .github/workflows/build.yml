@@ -58,3 +58,4 @@ jobs:
       with:
         name: terraform-provisioner-salt-highstate_v0.0.${GITHUB_RUN_ID}_windows_amd64.exe
         path: terraform-provisioner-salt-highstate_windows_amd64.exe
+
