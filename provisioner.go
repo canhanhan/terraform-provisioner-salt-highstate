@@ -35,6 +35,11 @@ func Provisioner() terraform.ResourceProvisioner {
 				Type:     schema.TypeString,
 				Required: true,
 			},
+			"skip_verify": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
 			"minion_id": {
 				Type:     schema.TypeString,
 				Required: true,
@@ -64,6 +69,7 @@ func apply(ctx context.Context) error {
 		d.Get("username").(string),
 		d.Get("password").(string),
 		d.Get("backend").(string),
+		d.Get("skip_verify").(bool),
 	)
 
 	if err := cli.Login(ctx); err != nil {
