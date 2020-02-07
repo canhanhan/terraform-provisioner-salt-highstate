@@ -4,8 +4,8 @@ on:
     tags:
     - 'v*'
 jobs:
-  build:
-    name: Build
+  deploy:
+    name: Build and Deploy
     runs-on: ubuntu-latest
     steps:
     - name: Set up Go 1.13
@@ -16,6 +16,9 @@ jobs:
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
+
+    - name: Set env
+      run: echo ::set-env name=RELEASE_VERSION::${GITHUB_REF:10}
 
     - name: Test
       run: go test .
@@ -39,8 +42,8 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
       with:
         tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        body: ${{ github.tag }}
+        release_name: Release ${{ env.RELEASE_VERSION }}
+        body: ${{ env.RELEASE_VERSION }}
         draft: true
         prerelease: false
 
@@ -51,7 +54,7 @@ jobs:
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: ./terraform-provisioner-salt-highstate_linux_386
-        asset_name: terraform-provisioner-salt-highstate_${{ github.tag }}_linux_386
+        asset_name: terraform-provisioner-salt-highstate_${{ env.RELEASE_VERSION }}_linux_386
         asset_content_type: application/octet-stream
 
     - name: Upload Linux x64
@@ -61,7 +64,7 @@ jobs:
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: ./terraform-provisioner-salt-highstate_linux_amd64
-        asset_name: terraform-provisioner-salt-highstate_${{ github.tag }}_linux_amd64
+        asset_name: terraform-provisioner-salt-highstate_${{ env.RELEASE_VERSION }}_linux_amd64
         asset_content_type: application/octet-stream
 
     - name: Upload Windows x86
@@ -71,7 +74,7 @@ jobs:
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: ./terraform-provisioner-salt-highstate_windows_386.exe
-        asset_name: terraform-provisioner-salt-highstate_${{ github.tag }}_windows_386.exe
+        asset_name: terraform-provisioner-salt-highstate_${{ env.RELEASE_VERSION }}_windows_386.exe
         asset_content_type: application/octet-stream
 
     - name: Upload Windows x64
@@ -81,5 +84,5 @@ jobs:
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: ./terraform-provisioner-salt-highstate_windows_amd64.exe
-        asset_name: terraform-provisioner-salt-highstate_${{ github.tag }}_windows_amd64.exe
+        asset_name: terraform-provisioner-salt-highstate_${{ env.RELEASE_VERSION }}_windows_amd64.exe
         asset_content_type: application/octet-stream
