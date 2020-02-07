@@ -51,8 +51,7 @@ func Provisioner() terraform.ResourceProvisioner {
 			},
 		},
 
-		ApplyFunc:    apply,
-		ValidateFunc: validate,
+		ApplyFunc: apply,
 	}
 }
 
@@ -127,9 +126,6 @@ func apply(ctx context.Context) error {
 
 	return nil
 }
-
-func validate(c *terraform.ResourceConfig) (ws []string, es []error) {
-	return ws, es
 }
 
 func waitForMinion(ctx context.Context, o terraform.UIOutput, cli *salt.Client, minion string, interval time.Duration, timeout time.Duration) error {
