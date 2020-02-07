@@ -12,6 +12,12 @@ import (
 	"github.com/hashicorp/terraform/terraform"
 )
 
+// ErrorHighstateFailed indicates that highstate command failed on the minion
+var ErrorHighstateFailed = errors.New("Highstate execution failed")
+
+// ErrorMinionNotAvailable indicates that the minion was avaliable (offline or not registered)
+var ErrorMinionNotAvailable = errors.New("Minion is not available")
+
 /*
 Provisioner is waits for a minion to connect to a master;
 and applies highstate then reports whether it completed successfully.
@@ -82,56 +88,72 @@ func apply(ctx context.Context) error {
 	defer cancel()
 
 	minion := d.Get("minion_id").(string)
-	o.Output(fmt.Sprintf("Waiting for minion %s to register with master", minion))
-	if err := waitForMinion(ctx, o, cli, minion, interval, timeout); err != nil {
-		return err
-	}
+	attempts := 0
+	maxAttempts := 3
 
-	o.Output(fmt.Sprintf("Executing state.highstate on minion %s", minion))
-	res, err := cli.RunCommand(ctx, salt.Command{
-		Client:   salt.LocalClient,
-		Target:   salt.ListTarget{Targets: []string{minion}},
-		Function: "state.highstate",
-	})
-
-	if err != nil {
-		return err
-	}
-
-	rd, ok := res.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid response from Salt Master: expected map; received %s", res)
-	}
-
-	md, ok := rd[minion]
-	if !ok {
-		return fmt.Errorf("Salt has not returned minion information: %s", d)
-	}
-
-	data, ok := md.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("Minion response was not a map. Minion might be offline: %s", data)
-	}
-
-	if data["retcode"].(float64) != 0 {
-		ls, ok := data["ret"].(map[string]interface{})
-		if ok {
-			var fails []string
-			for k, v := range ls {
-				state := v.(map[string]interface{})
-				if !state["result"].(bool) {
-					fails = append(fails, fmt.Sprintf("State %s failed on %s: %s", k, minion, state["comment"]))
-				}
-			}
-
-			return errors.New(strings.Join(fails, "\n"))
+	for {
+		if attempts >= maxAttempts {
+			return fmt.Errorf("%w: could not execute highstate in %d attempts", ErrorMinionNotAvailable, attempts)
 		}
 
-		return fmt.Errorf("Highstate execution failed on %s: %s", minion, data["ret"])
-	}
+		attempts++
 
-	return nil
-}
+		o.Output(fmt.Sprintf("Waiting for minion %s to register with master", minion))
+		if err := waitForMinion(ctx, o, cli, minion, interval, timeout); err != nil {
+			return err
+		}
+
+		o.Output(fmt.Sprintf("Executing state.highstate on minion %s", minion))
+		res, err := cli.RunCommand(ctx, salt.Command{
+			Client:   salt.LocalClient,
+			Target:   salt.ListTarget{Targets: []string{minion}},
+			Function: "state.highstate",
+		})
+
+		if err != nil {
+			return err
+		}
+
+		rd, ok := res.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("invalid response from Salt Master: expected map; received %s", res)
+		}
+
+		md, ok := rd[minion]
+		if !ok {
+			o.Output(fmt.Sprintf("Minion %s is not registered. Will retry.", minion))
+			continue
+		}
+
+		data, ok := md.(map[string]interface{})
+		if !ok {
+			if _, ok := md.(bool); ok {
+				o.Output(fmt.Sprintf("Minion %s is not available. Will retry.", minion))
+				continue
+			}
+
+			return fmt.Errorf("invalid highstate response: expected map; received: %s", data)
+		}
+
+		if data["retcode"].(float64) != 0 {
+			ls, ok := data["ret"].(map[string]interface{})
+			if ok {
+				var fails []string
+				for k, v := range ls {
+					state := v.(map[string]interface{})
+					if !state["result"].(bool) {
+						fails = append(fails, fmt.Sprintf("State %s failed on %s: %s", k, minion, state["comment"]))
+					}
+				}
+
+				return fmt.Errorf("%w:\n%s", ErrorHighstateFailed, strings.Join(fails, "\n"))
+			}
+
+			return fmt.Errorf("Highstate execution failed on %s: %s", minion, data["ret"])
+		}
+
+		return nil
+	}
 }
 
 func waitForMinion(ctx context.Context, o terraform.UIOutput, cli *salt.Client, minion string, interval time.Duration, timeout time.Duration) error {
