@@ -31,6 +31,7 @@ terraform-provisioner-salt-highstate requires Go version 1.13 or greater.
 | `password`| String | **Required** | Password |
 | `backend` | String | **Required** | External authentincation backend (eauth) (e.g.: pam) |
 | `minion_id` | String | **Required** | Minion ID |
+| `skip_verify` | Bool | *Optional* | Skip TLS/SSL verifications (Default: false) |
 | `timeout_minutes` | Int | *Optional* | No of minutes to wait for minion to become available (Default: 30 mins) |
 | `interval_secs` | Int | *Optional* | Interval in seconds to poll minion status from master (Default: 10 secs) |
 
