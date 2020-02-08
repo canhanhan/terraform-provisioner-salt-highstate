@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	apiTester "github.com/finarfin/go-apiclient-tester/common"
+	apiTester "github.com/finarfin/go-apiclient-tester/tester"
 	"github.com/finarfin/go-apiclient-tester/postman"
 	salt "github.com/finarfin/go-salt-netapi-client/cherrypy"
 	"github.com/hashicorp/terraform/helper/schema"
